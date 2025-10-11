@@ -4,6 +4,13 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    // Copy version.c to libmdbx source directory
+    const copy_version = b.addSystemCommand(&[_][]const u8{
+        "cp",
+        "version.c",
+        "libs/libmdbx/src/version.c",
+    });
+
     // Shared library
     const lib = b.addLibrary(.{
         .name = "lmdbx",
@@ -46,9 +53,11 @@ pub fn build(b: *std.Build) void {
     });
 
     mdbx.addCSourceFile(.{
-        .file = b.path("version.c"),
+        .file = b.path("libs/libmdbx/src/version.c"),
         .flags = &flags,
     });
+
+    mdbx.step.dependOn(&copy_version.step);
 
     mdbx.addIncludePath(b.path("libs/libmdbx"));
     mdbx.addIncludePath(b.path("libs/libmdbx/src"));
