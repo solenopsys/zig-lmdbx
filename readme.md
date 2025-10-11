@@ -1,30 +1,50 @@
- 
-# libmdbx wrapper для Zig
+# zig-lmdbx
 
- 
-```
+Zig wrapper for libmdbx with C API exports.
 
-### 2. Добавьте libmdbx submodule
+## Features
+
+- Zig-native interface to libmdbx
+- C API exports for FFI usage (Bun, Node.js, etc.)
+- Transaction support
+- Cursor operations
+
+## Building
+
 ```bash
-git submodule add https://github.com/erthink/libmdbx.git libs/libmdbx
-git submodule update --init --recursive
+zig build -Doptimize=ReleaseFast
 ```
 
-### 3. Создайте version.c
-```bash
-cat > version.c << 'EOF'
-#include "libs/libmdbx/src/essentials.h"
+The build process automatically copies the version.c file and compiles libmdbx as a static library.
 
-const char mdbx_sourcery_anchor[] = "mdbx-zig-build";
+## Usage
 
-const struct MDBX_version_info mdbx_version = {
-    1, 0, 0, {0, 0},
-    {"", "", "", ""},
-    "mdbx-zig-build"
-};
+The library exports a C API with the following functions:
 
-__cold const char *mdbx_sourcery_anchor_probe(void) {
-    return mdbx_sourcery_anchor;
-}
-EOF
-```
+- `open(path, db_ptr)` - Open database
+- `close(db_ptr)` - Close database
+- `put(db_ptr, key, key_len, value, value_len)` - Store key-value pair
+- `get(db_ptr, key, key_len, value_ptr, value_len)` - Retrieve value
+- `del(db_ptr, key, key_len)` - Delete key
+- `flush(db_ptr)` - Flush changes
+- `txn_begin(db_ptr)` - Begin transaction
+- `txn_commit(db_ptr)` - Commit transaction
+- `txn_abort(db_ptr)` - Abort transaction
+- `cursor_open(db_ptr, cursor_ptr)` - Open cursor
+- `cursor_close(cursor_ptr)` - Close cursor
+- `cursor_get(cursor_ptr, ...)` - Cursor operations
+
+## Examples
+
+The `bun_examples/` directory contains TypeScript examples for Bun runtime:
+
+- `test.ts` - Basic usage example (put, get, delete operations)
+- `performance-test.ts` - Performance benchmark for bulk operations
+- `performance-test-txn.ts` - Performance benchmark with transactions
+- `test-range.ts` - Cursor operations and range queries
+- `lmdbx.ts` - TypeScript FFI bindings
+
+## Requirements
+
+- Zig 0.15.1+
+- libmdbx submodule in `libs/libmdbx`
