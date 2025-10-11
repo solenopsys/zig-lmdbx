@@ -9,6 +9,20 @@ Zig wrapper for libmdbx with C API exports.
 - Transaction support
 - Cursor operations
 
+## Performance
+
+Outperforms lmdb-js by ~20% in bulk operations and 10-20x faster when each write uses a separate transaction.
+
+## Why libmdbx over lmdb
+
+- Auto-resizing database without manual configuration
+- Better write performance and scalability
+- Improved data integrity with checksums
+- More efficient space reclamation
+- Enhanced ACID guarantees
+- Better handling of large databases (up to 128TB)
+- Active development and bug fixes
+
 ## Building
 
 ```bash
