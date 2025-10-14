@@ -4,13 +4,6 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    // Copy version.c to libmdbx source directory
-    const copy_version = b.addSystemCommand(&[_][]const u8{
-        "cp",
-        "version.c",
-        "libs/libmdbx/src/version.c",
-    });
-
     // Shared library
     const lib = b.addLibrary(.{
         .name = "lmdbx",
@@ -53,11 +46,9 @@ pub fn build(b: *std.Build) void {
     });
 
     mdbx.addCSourceFile(.{
-        .file = b.path("libs/libmdbx/src/version.c"),
+        .file = b.path("version.c"),
         .flags = &flags,
     });
-
-    mdbx.step.dependOn(&copy_version.step);
 
     mdbx.addIncludePath(b.path("libs/libmdbx"));
     mdbx.addIncludePath(b.path("libs/libmdbx/src"));
@@ -68,4 +59,40 @@ pub fn build(b: *std.Build) void {
     lib.linkLibC();
 
     b.installArtifact(lib);
+
+    // Tests for cursor functions
+    const cursor_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/test_cursor.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+
+    cursor_tests.linkLibrary(mdbx);
+    cursor_tests.addIncludePath(b.path("libs/libmdbx"));
+    cursor_tests.linkLibC();
+
+    const run_cursor_tests = b.addRunArtifact(cursor_tests);
+
+    // Tests for C API functions
+    const c_api_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/test_c_api.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+
+    c_api_tests.root_module.addImport("lmdbx", lib.root_module);
+    c_api_tests.linkLibrary(lib);
+    c_api_tests.linkLibrary(mdbx);
+    c_api_tests.addIncludePath(b.path("libs/libmdbx"));
+    c_api_tests.linkLibC();
+
+    const run_c_api_tests = b.addRunArtifact(c_api_tests);
+
+    const test_step = b.step("test", "Run all integration tests");
+    test_step.dependOn(&run_cursor_tests.step);
+    test_step.dependOn(&run_c_api_tests.step);
 }

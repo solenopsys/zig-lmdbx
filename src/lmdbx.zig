@@ -16,10 +16,61 @@ pub const MdbxError = error{
     CursorOpenFailed,
 };
 
+pub const CursorEntry = struct {
+    key: []const u8,
+    value: []const u8,
+};
+
 pub const Cursor = struct {
     cursor: *c.MDBX_cursor,
     txn: *c.MDBX_txn,
     owns_txn: bool,
+
+    /// Seek to first key with given prefix
+    /// Returns the first entry or null if not found
+    pub fn seekPrefix(self: Cursor, allocator: std.mem.Allocator, prefix: []const u8) !?CursorEntry {
+        var k = c.MDBX_val{
+            .iov_base = @constCast(prefix.ptr),
+            .iov_len = prefix.len,
+        };
+        var v: c.MDBX_val = undefined;
+
+        const rc = c.mdbx_cursor_get(self.cursor, &k, &v, c.MDBX_SET_RANGE);
+        if (rc == c.MDBX_NOTFOUND) return null;
+        if (rc != c.MDBX_SUCCESS) return MdbxError.GetFailed;
+
+        const key_data = @as([*]u8, @ptrCast(k.iov_base))[0..k.iov_len];
+        const value_data = @as([*]u8, @ptrCast(v.iov_base))[0..v.iov_len];
+
+        // Check if key starts with prefix
+        if (key_data.len < prefix.len or !std.mem.eql(u8, key_data[0..prefix.len], prefix)) {
+            return null;
+        }
+
+        return CursorEntry{
+            .key = try allocator.dupe(u8, key_data),
+            .value = try allocator.dupe(u8, value_data),
+        };
+    }
+
+    /// Move to next entry
+    /// Returns the next entry or null if no more entries
+    pub fn next(self: Cursor, allocator: std.mem.Allocator) !?CursorEntry {
+        var k: c.MDBX_val = undefined;
+        var v: c.MDBX_val = undefined;
+
+        const rc = c.mdbx_cursor_get(self.cursor, &k, &v, c.MDBX_NEXT);
+        if (rc == c.MDBX_NOTFOUND) return null;
+        if (rc != c.MDBX_SUCCESS) return MdbxError.GetFailed;
+
+        const key_data = @as([*]u8, @ptrCast(k.iov_base))[0..k.iov_len];
+        const value_data = @as([*]u8, @ptrCast(v.iov_base))[0..v.iov_len];
+
+        return CursorEntry{
+            .key = try allocator.dupe(u8, key_data),
+            .value = try allocator.dupe(u8, value_data),
+        };
+    }
 };
 
 pub const Database = struct {
