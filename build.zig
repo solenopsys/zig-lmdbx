@@ -74,8 +74,8 @@ fn buildForTarget(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std
         "-fPIC",
         "-O3",
     };
-    const x86_gnu_flags = base_flags ++ [_][]const u8{ "-DMDBX_GCC_FASTMATH_i686_SIMD_WORKAROUND=1", "-D_SYS_CACHECTL_H=1" };
-    const x86_flags = base_flags ++ [_][]const u8{"-DMDBX_GCC_FASTMATH_i686_SIMD_WORKAROUND=1"};
+    const x86_gnu_flags = base_flags ++ [_][]const u8{ "-DMDBX_GCC_FASTMATH_i686_SIMD_WORKAROUND=1", "-D_SYS_CACHECTL_H=1", "-march=x86-64" };
+    const x86_flags = base_flags ++ [_][]const u8{ "-DMDBX_GCC_FASTMATH_i686_SIMD_WORKAROUND=1", "-march=x86-64" };
     const glibc_cross_flags = base_flags ++ [_][]const u8{"-D_SYS_CACHECTL_H=1"};
     const flags: []const []const u8 = if (cpu_arch == .x86_64 and (abi == .gnu or abi == .gnueabi or abi == .gnueabihf))
         &x86_gnu_flags
@@ -94,6 +94,11 @@ fn buildForTarget(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std
     mdbx.addCSourceFile(.{
         .file = b.path("version.c"),
         .flags = flags,
+    });
+
+    mdbx.addCSourceFile(.{
+        .file = b.path("cpu_stub.c"),
+        .flags = &[_][]const u8{"-fPIC"},
     });
 
     mdbx.addIncludePath(b.path("libs/libmdbx"));
@@ -165,8 +170,8 @@ pub fn build(b: *std.Build) void {
             "-fPIC",
             "-O3",
         };
-        const x86_gnu_flags_test = base_flags_test ++ [_][]const u8{ "-DMDBX_GCC_FASTMATH_i686_SIMD_WORKAROUND=1", "-D_SYS_CACHECTL_H=1" };
-        const x86_flags_test = base_flags_test ++ [_][]const u8{"-DMDBX_GCC_FASTMATH_i686_SIMD_WORKAROUND=1"};
+        const x86_gnu_flags_test = base_flags_test ++ [_][]const u8{ "-DMDBX_GCC_FASTMATH_i686_SIMD_WORKAROUND=1", "-D_SYS_CACHECTL_H=1", "-march=x86-64" };
+        const x86_flags_test = base_flags_test ++ [_][]const u8{ "-DMDBX_GCC_FASTMATH_i686_SIMD_WORKAROUND=1", "-march=x86-64" };
         const glibc_cross_flags_test = base_flags_test ++ [_][]const u8{"-D_SYS_CACHECTL_H=1"};
         const flags: []const []const u8 = if (cpu_arch_test == .x86_64 and (abi_test == .gnu or abi_test == .gnueabi or abi_test == .gnueabihf))
             &x86_gnu_flags_test
@@ -185,6 +190,11 @@ pub fn build(b: *std.Build) void {
         mdbx.addCSourceFile(.{
             .file = b.path("version.c"),
             .flags = flags,
+        });
+
+        mdbx.addCSourceFile(.{
+            .file = b.path("cpu_stub.c"),
+            .flags = &[_][]const u8{"-fPIC"},
         });
 
         mdbx.addIncludePath(b.path("libs/libmdbx"));
