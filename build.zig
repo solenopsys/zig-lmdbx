@@ -106,7 +106,7 @@ fn buildForTarget(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std
     mdbx.linkLibC();
 
     lib.linkLibrary(mdbx);
-    lib.addIncludePath(b.path("libs/libmdbx"));
+    // No need for include paths - using pure Zig FFI
     lib.linkLibC();
 
     b.installArtifact(lib);
@@ -219,7 +219,7 @@ pub fn build(b: *std.Build) void {
         });
 
         lib.linkLibrary(mdbx);
-        lib.addIncludePath(b.path("libs/libmdbx"));
+        // No need for include paths - using pure Zig FFI
         lib.linkLibC();
 
         // Tests for cursor functions
@@ -232,7 +232,7 @@ pub fn build(b: *std.Build) void {
         });
 
         cursor_tests.linkLibrary(mdbx);
-        cursor_tests.addIncludePath(b.path("libs/libmdbx"));
+        // No need for include paths - using pure Zig FFI
         cursor_tests.linkLibC();
 
         const run_cursor_tests = b.addRunArtifact(cursor_tests);
@@ -249,7 +249,7 @@ pub fn build(b: *std.Build) void {
         c_api_tests.root_module.addImport("lmdbx", lib.root_module);
         c_api_tests.linkLibrary(lib);
         c_api_tests.linkLibrary(mdbx);
-        c_api_tests.addIncludePath(b.path("libs/libmdbx"));
+        // No need for include paths - using pure Zig FFI
         c_api_tests.linkLibC();
 
         const run_c_api_tests = b.addRunArtifact(c_api_tests);

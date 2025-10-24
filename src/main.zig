@@ -113,12 +113,13 @@ export fn lmdbx_cursor_get(
     value_len: *usize,
     op: c_int,
 ) c_int {
+    const ffi = @import("lmdbx_pure.zig");
     const cursor: *lmdbx.Cursor = @alignCast(@ptrCast(cursor_ptr orelse return -1));
-    var k: @import("lmdbx.zig").c.MDBX_val = undefined;
-    var v: @import("lmdbx.zig").c.MDBX_val = undefined;
+    var k: ffi.MDBX_val = undefined;
+    var v: ffi.MDBX_val = undefined;
 
-    const rc = @import("lmdbx.zig").c.mdbx_cursor_get(cursor.cursor, &k, &v, @intCast(op));
-    if (rc != @import("lmdbx.zig").c.MDBX_SUCCESS) return rc;
+    const rc = ffi.mdbx_cursor_get(cursor.cursor, &k, &v, @intCast(op));
+    if (rc != ffi.MDBX_SUCCESS) return rc;
 
     key_ptr.* = @ptrCast(k.iov_base);
     key_len.* = k.iov_len;
