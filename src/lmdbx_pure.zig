@@ -54,6 +54,15 @@ pub extern "c" fn mdbx_env_close(env: ?*MDBX_env) c_int;
 pub extern "c" fn mdbx_env_open(env: ?*MDBX_env, path: [*:0]const u8, flags: c_uint, mode: c_uint) c_int;
 pub extern "c" fn mdbx_env_set_maxreaders(env: ?*MDBX_env, readers: c_uint) c_int;
 pub extern "c" fn mdbx_env_set_maxdbs(env: ?*MDBX_env, dbs: c_uint) c_int;
+pub extern "c" fn mdbx_env_set_geometry(
+    env: ?*MDBX_env,
+    size_lower: isize,
+    size_now: isize,
+    size_upper: isize,
+    growth_step: isize,
+    shrink_threshold: isize,
+    pagesize: isize,
+) c_int;
 pub extern "c" fn mdbx_env_sync(env: ?*MDBX_env) c_int;
 
 pub extern "c" fn mdbx_txn_begin(env: ?*MDBX_env, parent: ?*MDBX_txn, flags: c_uint, txn: *?*MDBX_txn) c_int;

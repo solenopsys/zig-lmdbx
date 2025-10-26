@@ -87,7 +87,7 @@ pub const Database = struct {
         _ = ffi.mdbx_env_set_maxreaders(env, 126);
         _ = ffi.mdbx_env_set_maxdbs(env, 128);
 
-        rc = ffi.mdbx_env_open(env, path.ptr, ffi.MDBX_CREATE | ffi.MDBX_COALESCE | ffi.MDBX_LIFORECLAIM | ffi.MDBX_NOMETASYNC | ffi.MDBX_SAFE_NOSYNC, 0o664);
+        rc = ffi.mdbx_env_open(env, path.ptr, ffi.MDBX_CREATE, 0o664);
         if (rc != ffi.MDBX_SUCCESS) {
             _ = ffi.mdbx_env_close(env);
             return MdbxError.OpenFailed;
@@ -180,6 +180,32 @@ pub const Database = struct {
         const data = @as([*]u8, @ptrCast(v.iov_base))[0..v.iov_len];
         const result = try allocator.dupe(u8, data);
         return result;
+    }
+
+    pub fn hasKey(self: *Database, key: []const u8) !bool {
+        const use_current = self.current_txn != null;
+        var txn: ?*ffi.MDBX_txn = self.current_txn;
+
+        if (!use_current) {
+            const rc = ffi.mdbx_txn_begin(self.env, null, ffi.MDBX_TXN_RDONLY, &txn);
+            if (rc != ffi.MDBX_SUCCESS) return MdbxError.TxnBeginFailed;
+        }
+        defer {
+            if (!use_current) _ = ffi.mdbx_txn_abort(txn);
+        }
+
+        var k = ffi.MDBX_val{
+            .iov_base = @constCast(key.ptr),
+            .iov_len = key.len,
+        };
+        var v: ffi.MDBX_val = undefined;
+
+        const rc = ffi.mdbx_get(txn, self.dbi, &k, &v);
+        switch (rc) {
+            ffi.MDBX_SUCCESS => return true,
+            ffi.MDBX_NOTFOUND => return false,
+            else => return MdbxError.GetFailed,
+        }
     }
 
     pub fn delete(self: *Database, key: []const u8) !void {
