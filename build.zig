@@ -1,40 +1,21 @@
 const std = @import("std");
+const build_utils = @import("build_utils.zig");
 
-fn getTargetString(target: std.Build.ResolvedTarget) []const u8 {
-    const cpu_arch = target.result.cpu.arch;
-    const abi = target.result.abi;
+fn buildForTarget(
+    b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    artifacts_dir: []const u8,
+    hashes: *std.StringHashMap([]const u8),
+    json_step: *build_utils.WriteJsonStep,
+) void {
+    const target_str = build_utils.getTargetString(target);
+    const lib_name = build_utils.getLibName(std.heap.page_allocator, "lmdbx", target_str);
 
-    const arch_str = switch (cpu_arch) {
-        .x86_64 => "x86_64",
-        .aarch64 => "aarch64",
-        else => "unknown",
-    };
-
-    const libc_str = switch (abi) {
-        .musl, .musleabi, .musleabihf => "musl",
-        .gnu, .gnueabi, .gnueabihf => "gnu",
-        else => "gnu",
-    };
-
-    return std.fmt.allocPrint(
-        std.heap.page_allocator,
-        "{s}-{s}",
-        .{ arch_str, libc_str },
-    ) catch "unknown";
-}
-
-fn buildForTarget(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) void {
-    const target_str = getTargetString(target);
-    const lib_name = std.fmt.allocPrint(
-        std.heap.page_allocator,
-        "lmdbx-{s}",
-        .{target_str},
-    ) catch "lmdbx";
-
-    // Shared library
+    // Static library
     const lib = b.addLibrary(.{
         .name = lib_name,
-        .linkage = .dynamic,
+        .linkage = .static,
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/main.zig"),
             .target = target,
@@ -42,11 +23,7 @@ fn buildForTarget(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std
         }),
     });
 
-    const mdbx_name = std.fmt.allocPrint(
-        std.heap.page_allocator,
-        "mdbx-{s}",
-        .{target_str},
-    ) catch "mdbx";
+    const mdbx_name = build_utils.getLibName(std.heap.page_allocator, "mdbx", target_str);
 
     const mdbx = b.addLibrary(.{
         .name = mdbx_name,
@@ -72,7 +49,10 @@ fn buildForTarget(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std
         "-Wno-date-time",
         "-fno-sanitize=undefined",
         "-fPIC",
-        "-O3",
+        "-O2",
+        "-ffunction-sections",
+        "-fdata-sections",
+        "-fvisibility=hidden",
     };
     const x86_gnu_flags = base_flags ++ [_][]const u8{ "-DMDBX_GCC_FASTMATH_i686_SIMD_WORKAROUND=1", "-D_SYS_CACHECTL_H=1", "-march=x86-64" };
     const x86_flags = base_flags ++ [_][]const u8{ "-DMDBX_GCC_FASTMATH_i686_SIMD_WORKAROUND=1", "-march=x86-64" };
@@ -106,44 +86,47 @@ fn buildForTarget(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std
     mdbx.linkLibC();
 
     lib.linkLibrary(mdbx);
-    // No need for include paths - using pure Zig FFI
     lib.linkLibC();
 
-    b.installArtifact(lib);
+    const install = b.addInstallArtifact(lib, .{});
+
+    const hash_step = build_utils.HashAndMoveStep.create(
+        b,
+        lib_name,
+        target_str,
+        artifacts_dir,
+        hashes,
+    );
+    hash_step.step.dependOn(&install.step);
+
+    json_step.step.dependOn(&hash_step.step);
 }
 
 pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
+    const artifacts_dir = "../../artifacts/libs";
+    const json_path = "current.json";
 
     // Option to build for all targets or a specific target
     const build_all = b.option(bool, "all", "Build for all supported targets") orelse false;
 
     if (build_all) {
-        // Build for all supported targets
-        const targets = [_]std.Target.Query{
-            .{ .cpu_arch = .x86_64, .os_tag = .linux, .abi = .gnu },
-            .{ .cpu_arch = .x86_64, .os_tag = .linux, .abi = .musl },
-            .{ .cpu_arch = .aarch64, .os_tag = .linux, .abi = .gnu },
-            .{ .cpu_arch = .aarch64, .os_tag = .linux, .abi = .musl },
-        };
+        const hashes = build_utils.createHashMap(b);
+        const json_step = build_utils.WriteJsonStep.create(b, hashes, json_path);
 
-        for (targets) |query| {
+        for (build_utils.supported_targets) |query| {
             const target = b.resolveTargetQuery(query);
-            buildForTarget(b, target, optimize);
+            buildForTarget(b, target, optimize, artifacts_dir, hashes, json_step);
         }
+
+        b.default_step.dependOn(&json_step.step);
     } else {
         // Build for a single target (specified by user or native)
         const target = b.standardTargetOptions(.{});
-        buildForTarget(b, target, optimize);
+        const target_str = build_utils.getTargetString(target);
 
-        // Tests only for single-target builds (using the specified target)
-        const mdbx_name = std.fmt.allocPrint(
-            std.heap.page_allocator,
-            "mdbx-{s}",
-            .{getTargetString(target)},
-        ) catch "mdbx";
+        const mdbx_name = build_utils.getLibName(std.heap.page_allocator, "mdbx", target_str);
 
-        // Recreate mdbx for tests (needed because buildForTarget is separate)
         const mdbx = b.addLibrary(.{
             .name = mdbx_name,
             .linkage = .static,
@@ -168,7 +151,10 @@ pub fn build(b: *std.Build) void {
             "-Wno-date-time",
             "-fno-sanitize=undefined",
             "-fPIC",
-            "-O3",
+            "-O2",
+            "-ffunction-sections",
+            "-fdata-sections",
+            "-fvisibility=hidden",
         };
         const x86_gnu_flags_test = base_flags_test ++ [_][]const u8{ "-DMDBX_GCC_FASTMATH_i686_SIMD_WORKAROUND=1", "-D_SYS_CACHECTL_H=1", "-march=x86-64" };
         const x86_flags_test = base_flags_test ++ [_][]const u8{ "-DMDBX_GCC_FASTMATH_i686_SIMD_WORKAROUND=1", "-march=x86-64" };
@@ -202,15 +188,11 @@ pub fn build(b: *std.Build) void {
         mdbx.linkLibC();
 
         // Recreate lib for tests
-        const lib_name = std.fmt.allocPrint(
-            std.heap.page_allocator,
-            "lmdbx-{s}",
-            .{getTargetString(target)},
-        ) catch "lmdbx";
+        const lib_name = build_utils.getLibName(std.heap.page_allocator, "lmdbx", target_str);
 
         const lib = b.addLibrary(.{
             .name = lib_name,
-            .linkage = .dynamic,
+            .linkage = .static,
             .root_module = b.createModule(.{
                 .root_source_file = b.path("src/main.zig"),
                 .target = target,
@@ -219,8 +201,9 @@ pub fn build(b: *std.Build) void {
         });
 
         lib.linkLibrary(mdbx);
-        // No need for include paths - using pure Zig FFI
         lib.linkLibC();
+
+        b.installArtifact(lib);
 
         // Tests for cursor functions
         const cursor_tests = b.addTest(.{
@@ -232,7 +215,6 @@ pub fn build(b: *std.Build) void {
         });
 
         cursor_tests.linkLibrary(mdbx);
-        // No need for include paths - using pure Zig FFI
         cursor_tests.linkLibC();
 
         const run_cursor_tests = b.addRunArtifact(cursor_tests);
@@ -249,7 +231,6 @@ pub fn build(b: *std.Build) void {
         c_api_tests.root_module.addImport("lmdbx", lib.root_module);
         c_api_tests.linkLibrary(lib);
         c_api_tests.linkLibrary(mdbx);
-        // No need for include paths - using pure Zig FFI
         c_api_tests.linkLibC();
 
         const run_c_api_tests = b.addRunArtifact(c_api_tests);
