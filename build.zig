@@ -1,5 +1,5 @@
 const std = @import("std");
-const build_utils = @import("build_utils.zig");
+const build_utils = @import("build_utils.zig"); // simlink ../comptime/build_utils.zig
 
 fn buildForTarget(
     b: *std.Build,
@@ -67,7 +67,7 @@ fn buildForTarget(
         &base_flags;
 
     mdbx.addCSourceFile(.{
-        .file = b.path("libs/libmdbx/src/alloy.c"),
+        .file = b.path("vendor/libmdbx/src/alloy.c"),
         .flags = flags,
     });
 
