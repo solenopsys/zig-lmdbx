@@ -1,1 +1,1 @@
-../../comptime/build-tool/build_utils.zig
+../../comptime/build_utils.zig
