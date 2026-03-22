@@ -12,10 +12,9 @@ fn buildForTarget(
     const target_str = build_utils.getTargetString(target);
     const lib_name = build_utils.getLibName(std.heap.page_allocator, "lmdbx", target_str);
 
-    // Static library
     const lib = b.addLibrary(.{
         .name = lib_name,
-        .linkage = .static,
+        .linkage = .dynamic,
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/main.zig"),
             .target = target,
@@ -81,8 +80,8 @@ fn buildForTarget(
         .flags = &[_][]const u8{"-fPIC"},
     });
 
-    mdbx.addIncludePath(b.path("libs/libmdbx"));
-    mdbx.addIncludePath(b.path("libs/libmdbx/src"));
+    mdbx.addIncludePath(b.path("vendor/libmdbx"));
+    mdbx.addIncludePath(b.path("vendor/libmdbx/src"));
     mdbx.linkLibC();
 
     lib.linkLibrary(mdbx);
@@ -169,7 +168,7 @@ pub fn build(b: *std.Build) void {
             &base_flags_test;
 
         mdbx.addCSourceFile(.{
-            .file = b.path("libs/libmdbx/src/alloy.c"),
+            .file = b.path("vendor/libmdbx/src/alloy.c"),
             .flags = flags,
         });
 
@@ -183,8 +182,8 @@ pub fn build(b: *std.Build) void {
             .flags = &[_][]const u8{"-fPIC"},
         });
 
-        mdbx.addIncludePath(b.path("libs/libmdbx"));
-        mdbx.addIncludePath(b.path("libs/libmdbx/src"));
+        mdbx.addIncludePath(b.path("vendor/libmdbx"));
+        mdbx.addIncludePath(b.path("vendor/libmdbx/src"));
         mdbx.linkLibC();
 
         // Recreate lib for tests
