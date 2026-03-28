@@ -237,5 +237,22 @@ pub fn build(b: *std.Build) void {
         const test_step = b.step("test", "Run all integration tests");
         test_step.dependOn(&run_cursor_tests.step);
         test_step.dependOn(&run_c_api_tests.step);
+
+        const compact_test_exe = b.addExecutable(.{
+            .name = "compact_test",
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("compact_test.zig"),
+                .target = target,
+                .optimize = optimize,
+            }),
+        });
+        compact_test_exe.root_module.addImport("lmdbx", lib.root_module);
+        compact_test_exe.linkLibrary(lib);
+        compact_test_exe.linkLibrary(mdbx);
+        compact_test_exe.linkLibC();
+
+        const run_compact_test = b.addRunArtifact(compact_test_exe);
+        const compact_step = b.step("compact-test", "Run compact test");
+        compact_step.dependOn(&run_compact_test.step);
     }
 }

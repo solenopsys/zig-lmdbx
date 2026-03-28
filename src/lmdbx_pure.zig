@@ -95,7 +95,17 @@ pub const MDBX_envinfo_geo = extern struct {
 
 pub const MDBX_envinfo = extern struct {
     geo: MDBX_envinfo_geo,
-    // remaining fields omitted — we only need geo
+    mi_mapsize: u64,
+    mi_last_pgno: u64,
+    mi_recent_txnid: u64,
+    mi_latter_reader_txnid: u64,
+    mi_self_latter_reader_txnid: u64,
+    mi_meta_txnid: [3]u64,
+    mi_meta_sign: [3]u64,
+    mi_maxreaders: u32,
+    mi_numreaders: u32,
+    mi_dxb_pagesize: u32,
+    mi_sys_pagesize: u32,
 };
 
 pub extern "c" fn mdbx_env_info_ex(env: ?*const MDBX_env, txn: ?*const MDBX_txn, info: *MDBX_envinfo, bytes: usize) c_int;

@@ -182,7 +182,7 @@ pub const Database = struct {
     fn growMap(self: *Database) bool {
         // Получаем текущий размер
         var info: ffi.MDBX_envinfo = undefined;
-        var info_rc = ffi.mdbx_env_info_ex(self.env, null, &info, @sizeOf(ffi.MDBX_envinfo));
+        const info_rc = ffi.mdbx_env_info_ex(self.env, null, &info, @sizeOf(ffi.MDBX_envinfo));
         if (info_rc != ffi.MDBX_SUCCESS) {
             std.log.err("mdbx_env_info_ex failed: rc={d}", .{info_rc});
             return false;
@@ -350,12 +350,13 @@ pub const Database = struct {
     /// Compact database: copy with MDBX_CP_COMPACT to tmp, then replace original.
     /// path must be the same directory that was passed to open().
     pub fn compact(self: *Database, allocator: std.mem.Allocator, path: []const u8) !void {
-        const tmp_path = try std.fmt.allocPrintZ(allocator, "{s}-compact", .{path});
+        const tmp_str = try std.fmt.allocPrint(allocator, "{s}-compact", .{path});
+        defer allocator.free(tmp_str);
+        const tmp_path = try allocator.dupeZ(u8, tmp_str);
         defer allocator.free(tmp_path);
 
-        // Remove leftover tmp dir if exists
+        // Remove leftover tmp dir if exists — mdbx_env_copy creates the dir itself
         std.fs.cwd().deleteTree(tmp_path) catch {};
-        try std.fs.cwd().makePath(tmp_path);
 
         const rc = ffi.mdbx_env_copy(self.env, tmp_path.ptr, ffi.MDBX_CP_COMPACT);
         if (rc != ffi.MDBX_SUCCESS) {
@@ -367,32 +368,54 @@ pub const Database = struct {
         // Close current env
         _ = ffi.mdbx_env_close(self.env);
 
-        // Replace original with compacted: rename mdbx.dat
+        // mdbx_env_copy creates a single file at tmp_path.
+        // Atomic swap: rename original to .bak first, then put compacted in place.
+        // Only delete .bak after successful reopen — original is never lost until confirmed.
         const orig_dat = try std.fmt.allocPrint(allocator, "{s}/mdbx.dat", .{path});
         defer allocator.free(orig_dat);
-        const tmp_dat = try std.fmt.allocPrint(allocator, "{s}/mdbx.dat", .{tmp_path});
-        defer allocator.free(tmp_dat);
+        const bak_dat = try std.fmt.allocPrint(allocator, "{s}/mdbx.dat.bak", .{path});
+        defer allocator.free(bak_dat);
         const orig_lck = try std.fmt.allocPrint(allocator, "{s}/mdbx.lck", .{path});
         defer allocator.free(orig_lck);
-        const tmp_lck = try std.fmt.allocPrint(allocator, "{s}/mdbx.lck", .{tmp_path});
-        defer allocator.free(tmp_lck);
 
-        std.fs.cwd().deleteFile(orig_dat) catch {};
+        // Move original aside
+        std.fs.cwd().rename(orig_dat, bak_dat) catch {};
         std.fs.cwd().deleteFile(orig_lck) catch {};
-        std.fs.cwd().rename(tmp_dat, orig_dat) catch |e| {
+
+        // Put compacted file in place
+        std.fs.cwd().rename(tmp_str, orig_dat) catch |e| {
             std.log.err("compact rename dat failed: {}", .{e});
+            // Restore original
+            std.fs.cwd().rename(bak_dat, orig_dat) catch {};
             return MdbxError.OpenFailed;
         };
-        std.fs.cwd().rename(tmp_lck, orig_lck) catch {};
-        std.fs.cwd().deleteTree(tmp_path) catch {};
 
-        // Reopen
+        // Reopen — if this fails, bak is still there for manual recovery
         const path_z = try allocator.dupeZ(u8, path);
         defer allocator.free(path_z);
-        const reopened = try Database.open(path_z);
+        const reopened = Database.open(path_z) catch |e| {
+            std.log.err("compact reopen failed: {}", .{e});
+            return e;
+        };
         self.env = reopened.env;
         self.dbi = reopened.dbi;
         self.current_txn = null;
+
+        // Reopen succeeded — safe to delete backup
+        std.fs.cwd().deleteFile(bak_dat) catch {};
+    }
+
+    /// Returns utilization ratio (0.0 – 1.0): used pages / file size.
+    /// Returns null if info cannot be obtained.
+    pub fn utilization(self: *Database) ?f64 {
+        var info: ffi.MDBX_envinfo = undefined;
+        const rc = ffi.mdbx_env_info_ex(self.env, null, &info, @sizeOf(ffi.MDBX_envinfo));
+        if (rc != ffi.MDBX_SUCCESS) return null;
+        const page_size: u64 = if (info.mi_dxb_pagesize > 0) info.mi_dxb_pagesize else 4096;
+        const used_bytes: u64 = info.mi_last_pgno * page_size;
+        const file_size: u64 = info.geo.current;
+        if (file_size == 0) return null;
+        return @as(f64, @floatFromInt(used_bytes)) / @as(f64, @floatFromInt(file_size));
     }
 
     pub fn beginTransaction(self: *Database) !void {
