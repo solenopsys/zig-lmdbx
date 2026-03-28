@@ -4,3 +4,4 @@ dist
 .zig-cache
 zig-out
 test.db
+current.json
