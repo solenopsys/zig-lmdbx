@@ -9,11 +9,49 @@ pub const MdbxError = error{
     TxnCommitFailed,
     DbiOpenFailed,
     PutFailed,
+    MapFull,
     GetFailed,
     NotFound,
     DeleteFailed,
     CursorOpenFailed,
 };
+
+const mib: isize = 1024 * 1024;
+
+fn parseMiBEnv(name: []const u8, fallback_mib: isize) isize {
+    const raw = std.posix.getenv(name) orelse return fallback_mib;
+    const parsed = std.fmt.parseInt(isize, raw, 10) catch return fallback_mib;
+    if (parsed <= 0) return fallback_mib;
+    return parsed;
+}
+
+fn geometryFromEnv() struct {
+    lower: isize,
+    now: isize,
+    upper: isize,
+    growth: isize,
+    shrink: isize,
+} {
+    const lower_mib = parseMiBEnv("LMDBX_MAP_LOWER_MIB", 1);
+    const now_mib = parseMiBEnv("LMDBX_MAP_NOW_MIB", 1);
+    const upper_mib = parseMiBEnv("LMDBX_MAP_UPPER_MIB", 1024 * 1024);
+    const growth_mib = parseMiBEnv("LMDBX_MAP_GROWTH_MIB", 16);
+    const shrink_mib = parseMiBEnv("LMDBX_MAP_SHRINK_MIB", 16);
+
+    const lower_bytes = lower_mib * mib;
+    const now_bytes = @max(now_mib, lower_mib) * mib;
+    const upper_bytes = @max(upper_mib, now_mib) * mib;
+    const growth_bytes = @max(growth_mib, 1) * mib;
+    const shrink_bytes = @max(shrink_mib, 1) * mib;
+
+    return .{
+        .lower = lower_bytes,
+        .now = now_bytes,
+        .upper = upper_bytes,
+        .growth = growth_bytes,
+        .shrink = shrink_bytes,
+    };
+}
 
 pub const CursorEntry = struct {
     key: []const u8,
@@ -87,6 +125,22 @@ pub const Database = struct {
         _ = ffi.mdbx_env_set_maxreaders(env, 126);
         _ = ffi.mdbx_env_set_maxdbs(env, 128);
 
+        // Configure map geometry so large values don't fail with MDBX_MAP_FULL.
+        const g = geometryFromEnv();
+        rc = ffi.mdbx_env_set_geometry(
+            env,
+            g.lower,
+            g.now,
+            g.upper,
+            g.growth,
+            g.shrink,
+            -1,
+        );
+        if (rc != ffi.MDBX_SUCCESS) {
+            _ = ffi.mdbx_env_close(env);
+            return MdbxError.OpenFailed;
+        }
+
         rc = ffi.mdbx_env_open(env, path.ptr, ffi.MDBX_CREATE, 0o664);
         if (rc != ffi.MDBX_SUCCESS) {
             _ = ffi.mdbx_env_close(env);
@@ -125,34 +179,84 @@ pub const Database = struct {
         _ = ffi.mdbx_env_close(self.env);
     }
 
-    pub fn put(self: *Database, key: []const u8, value: []const u8) !void {
-        const use_current = self.current_txn != null;
-        var txn: ?*ffi.MDBX_txn = self.current_txn;
-
-        if (!use_current) {
-            const rc = ffi.mdbx_txn_begin(self.env, null, 0, &txn);
-            if (rc != ffi.MDBX_SUCCESS) return MdbxError.TxnBeginFailed;
+    fn growMap(self: *Database) bool {
+        // Получаем текущий размер
+        var info: ffi.MDBX_envinfo = undefined;
+        var info_rc = ffi.mdbx_env_info_ex(self.env, null, &info, @sizeOf(ffi.MDBX_envinfo));
+        if (info_rc != ffi.MDBX_SUCCESS) {
+            std.log.err("mdbx_env_info_ex failed: rc={d}", .{info_rc});
+            return false;
         }
 
-        var k = ffi.MDBX_val{
-            .iov_base = @constCast(key.ptr),
-            .iov_len = key.len,
-        };
-        var v = ffi.MDBX_val{
-            .iov_base = @constCast(value.ptr),
-            .iov_len = value.len,
-        };
+        const current: usize = @intCast(info.geo.current);
+        const upper: usize = @intCast(info.geo.upper);
+        // Удваиваем, но не больше upper
+        const new_size: isize = @intCast(@min(current * 2, upper));
 
-        var rc = ffi.mdbx_put(txn, self.dbi, &k, &v, ffi.MDBX_UPSERT);
+        std.log.warn("MDBX growing map: {d} MiB -> {d} MiB (upper={d} MiB)", .{
+            current / (1024 * 1024),
+            @as(usize, @intCast(new_size)) / (1024 * 1024),
+            upper / (1024 * 1024),
+        });
+
+        const rc = ffi.mdbx_env_set_geometry(self.env, -1, new_size, -1, -1, -1, -1);
         if (rc != ffi.MDBX_SUCCESS) {
-            if (!use_current) _ = ffi.mdbx_txn_abort(txn);
-            return MdbxError.PutFailed;
+            std.log.err("mdbx_env_set_geometry (grow) failed: rc={d} ({s})", .{ rc, ffi.mdbx_strerror(rc) });
+            return false;
+        }
+        return true;
+    }
+
+    pub fn put(self: *Database, key: []const u8, value: []const u8) !void {
+        const max_retries: u8 = 3;
+        var attempt: u8 = 0;
+
+        while (attempt < max_retries) : (attempt += 1) {
+            const use_current = self.current_txn != null;
+            var txn: ?*ffi.MDBX_txn = self.current_txn;
+
+            if (!use_current) {
+                const rc = ffi.mdbx_txn_begin(self.env, null, 0, &txn);
+                if (rc != ffi.MDBX_SUCCESS) return MdbxError.TxnBeginFailed;
+            }
+
+            var k = ffi.MDBX_val{
+                .iov_base = @constCast(key.ptr),
+                .iov_len = key.len,
+            };
+            var v = ffi.MDBX_val{
+                .iov_base = @constCast(value.ptr),
+                .iov_len = value.len,
+            };
+
+            var rc = ffi.mdbx_put(txn, self.dbi, &k, &v, ffi.MDBX_UPSERT);
+            if (rc == ffi.MDBX_MAP_FULL) {
+                if (!use_current) _ = ffi.mdbx_txn_abort(txn);
+                if (use_current) return MdbxError.MapFull; // caller manages txn, can't retry
+                std.log.warn("MDBX_MAP_FULL on put, growing map (attempt {d}/{d})", .{ attempt + 1, max_retries });
+                if (!self.growMap()) return MdbxError.MapFull;
+                continue;
+            }
+            if (rc != ffi.MDBX_SUCCESS) {
+                if (!use_current) _ = ffi.mdbx_txn_abort(txn);
+                std.log.err("mdbx_put failed: rc={d} ({s})", .{ rc, ffi.mdbx_strerror(rc) });
+                return MdbxError.PutFailed;
+            }
+
+            if (!use_current) {
+                rc = ffi.mdbx_txn_commit(txn);
+                if (rc == ffi.MDBX_MAP_FULL) {
+                    std.log.warn("MDBX_MAP_FULL on commit, growing map (attempt {d}/{d})", .{ attempt + 1, max_retries });
+                    if (!self.growMap()) return MdbxError.MapFull;
+                    continue;
+                }
+                if (rc != ffi.MDBX_SUCCESS) return MdbxError.TxnCommitFailed;
+            }
+
+            return; // success
         }
 
-        if (!use_current) {
-            rc = ffi.mdbx_txn_commit(txn);
-            if (rc != ffi.MDBX_SUCCESS) return MdbxError.TxnCommitFailed;
-        }
+        return MdbxError.MapFull;
     }
 
     pub fn get(self: *Database, allocator: std.mem.Allocator, key: []const u8) !?[]u8 {
@@ -241,6 +345,54 @@ pub const Database = struct {
     pub fn flush(self: *Database) !void {
         const rc = ffi.mdbx_env_sync(self.env);
         if (rc != ffi.MDBX_SUCCESS) return MdbxError.TxnCommitFailed;
+    }
+
+    /// Compact database: copy with MDBX_CP_COMPACT to tmp, then replace original.
+    /// path must be the same directory that was passed to open().
+    pub fn compact(self: *Database, allocator: std.mem.Allocator, path: []const u8) !void {
+        const tmp_path = try std.fmt.allocPrintZ(allocator, "{s}-compact", .{path});
+        defer allocator.free(tmp_path);
+
+        // Remove leftover tmp dir if exists
+        std.fs.cwd().deleteTree(tmp_path) catch {};
+        try std.fs.cwd().makePath(tmp_path);
+
+        const rc = ffi.mdbx_env_copy(self.env, tmp_path.ptr, ffi.MDBX_CP_COMPACT);
+        if (rc != ffi.MDBX_SUCCESS) {
+            std.log.err("mdbx_env_copy compact failed: rc={d} ({s})", .{ rc, ffi.mdbx_strerror(rc) });
+            std.fs.cwd().deleteTree(tmp_path) catch {};
+            return MdbxError.OpenFailed;
+        }
+
+        // Close current env
+        _ = ffi.mdbx_env_close(self.env);
+
+        // Replace original with compacted: rename mdbx.dat
+        const orig_dat = try std.fmt.allocPrint(allocator, "{s}/mdbx.dat", .{path});
+        defer allocator.free(orig_dat);
+        const tmp_dat = try std.fmt.allocPrint(allocator, "{s}/mdbx.dat", .{tmp_path});
+        defer allocator.free(tmp_dat);
+        const orig_lck = try std.fmt.allocPrint(allocator, "{s}/mdbx.lck", .{path});
+        defer allocator.free(orig_lck);
+        const tmp_lck = try std.fmt.allocPrint(allocator, "{s}/mdbx.lck", .{tmp_path});
+        defer allocator.free(tmp_lck);
+
+        std.fs.cwd().deleteFile(orig_dat) catch {};
+        std.fs.cwd().deleteFile(orig_lck) catch {};
+        std.fs.cwd().rename(tmp_dat, orig_dat) catch |e| {
+            std.log.err("compact rename dat failed: {}", .{e});
+            return MdbxError.OpenFailed;
+        };
+        std.fs.cwd().rename(tmp_lck, orig_lck) catch {};
+        std.fs.cwd().deleteTree(tmp_path) catch {};
+
+        // Reopen
+        const path_z = try allocator.dupeZ(u8, path);
+        defer allocator.free(path_z);
+        const reopened = try Database.open(path_z);
+        self.env = reopened.env;
+        self.dbi = reopened.dbi;
+        self.current_txn = null;
     }
 
     pub fn beginTransaction(self: *Database) !void {

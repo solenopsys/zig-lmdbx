@@ -17,6 +17,7 @@ pub const MDBX_dbi = u32;
 
 pub const MDBX_SUCCESS: c_int = 0;
 pub const MDBX_NOTFOUND: c_int = -30798;
+pub const MDBX_MAP_FULL: c_int = -30792;
 
 // Environment flags
 pub const MDBX_CREATE: c_uint = 0x40000;
@@ -78,3 +79,23 @@ pub extern "c" fn mdbx_del(txn: ?*MDBX_txn, dbi: MDBX_dbi, key: *MDBX_val, data:
 pub extern "c" fn mdbx_cursor_open(txn: ?*MDBX_txn, dbi: MDBX_dbi, cursor: *?*MDBX_cursor) c_int;
 pub extern "c" fn mdbx_cursor_close(cursor: ?*MDBX_cursor) void;
 pub extern "c" fn mdbx_cursor_get(cursor: ?*MDBX_cursor, key: *MDBX_val, data: *MDBX_val, op: c_uint) c_int;
+
+pub extern "c" fn mdbx_strerror(errnum: c_int) [*:0]const u8;
+pub extern "c" fn mdbx_env_copy(env: ?*MDBX_env, dest: [*:0]const u8, flags: c_uint) c_int;
+pub const MDBX_CP_COMPACT: c_uint = 2;
+
+// Geometry info (subset of MDBX_envinfo)
+pub const MDBX_envinfo_geo = extern struct {
+    lower: u64,
+    upper: u64,
+    current: u64,
+    shrink: u64,
+    grow: u64,
+};
+
+pub const MDBX_envinfo = extern struct {
+    geo: MDBX_envinfo_geo,
+    // remaining fields omitted — we only need geo
+};
+
+pub extern "c" fn mdbx_env_info_ex(env: ?*const MDBX_env, txn: ?*const MDBX_txn, info: *MDBX_envinfo, bytes: usize) c_int;
