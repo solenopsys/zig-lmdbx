@@ -7,11 +7,11 @@ test "cursor seekPrefix and next" {
     std.debug.print("\n[TEST] cursor seekPrefix and next\n", .{});
 
     // Cleanup
-    std.fs.cwd().deleteFile("/tmp/test_cursor.db") catch {};
-    std.fs.cwd().deleteFile("/tmp/test_cursor.db-lock") catch {};
+    std.Io.Dir.cwd().deleteFile(std.Options.debug_io, "/tmp/test_cursor.db") catch {};
+    std.Io.Dir.cwd().deleteFile(std.Options.debug_io, "/tmp/test_cursor.db-lock") catch {};
     defer {
-        std.fs.cwd().deleteFile("/tmp/test_cursor.db") catch {};
-        std.fs.cwd().deleteFile("/tmp/test_cursor.db-lock") catch {};
+        std.Io.Dir.cwd().deleteFile(std.Options.debug_io, "/tmp/test_cursor.db") catch {};
+        std.Io.Dir.cwd().deleteFile(std.Options.debug_io, "/tmp/test_cursor.db-lock") catch {};
     }
 
     var db = try lmdbx.Database.open("/tmp/test_cursor.db");
@@ -69,11 +69,11 @@ test "cursor seekPrefix not found" {
 
     std.debug.print("\n[TEST] cursor seekPrefix not found\n", .{});
 
-    std.fs.cwd().deleteFile("/tmp/test_cursor2.db") catch {};
-    std.fs.cwd().deleteFile("/tmp/test_cursor2.db-lock") catch {};
+    std.Io.Dir.cwd().deleteFile(std.Options.debug_io, "/tmp/test_cursor2.db") catch {};
+    std.Io.Dir.cwd().deleteFile(std.Options.debug_io, "/tmp/test_cursor2.db-lock") catch {};
     defer {
-        std.fs.cwd().deleteFile("/tmp/test_cursor2.db") catch {};
-        std.fs.cwd().deleteFile("/tmp/test_cursor2.db-lock") catch {};
+        std.Io.Dir.cwd().deleteFile(std.Options.debug_io, "/tmp/test_cursor2.db") catch {};
+        std.Io.Dir.cwd().deleteFile(std.Options.debug_io, "/tmp/test_cursor2.db-lock") catch {};
     }
 
     var db = try lmdbx.Database.open("/tmp/test_cursor2.db");
@@ -97,11 +97,11 @@ test "cursor next until end" {
 
     std.debug.print("\n[TEST] cursor next until end\n", .{});
 
-    std.fs.cwd().deleteFile("/tmp/test_cursor3.db") catch {};
-    std.fs.cwd().deleteFile("/tmp/test_cursor3.db-lock") catch {};
+    std.Io.Dir.cwd().deleteFile(std.Options.debug_io, "/tmp/test_cursor3.db") catch {};
+    std.Io.Dir.cwd().deleteFile(std.Options.debug_io, "/tmp/test_cursor3.db-lock") catch {};
     defer {
-        std.fs.cwd().deleteFile("/tmp/test_cursor3.db") catch {};
-        std.fs.cwd().deleteFile("/tmp/test_cursor3.db-lock") catch {};
+        std.Io.Dir.cwd().deleteFile(std.Options.debug_io, "/tmp/test_cursor3.db") catch {};
+        std.Io.Dir.cwd().deleteFile(std.Options.debug_io, "/tmp/test_cursor3.db-lock") catch {};
     }
 
     var db = try lmdbx.Database.open("/tmp/test_cursor3.db");

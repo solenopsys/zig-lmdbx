@@ -65,27 +65,27 @@ fn buildForTarget(
     else
         &base_flags;
 
-    mdbx.addCSourceFile(.{
+    mdbx.root_module.addCSourceFile(.{
         .file = b.path("vendor/libmdbx/src/alloy.c"),
         .flags = flags,
     });
 
-    mdbx.addCSourceFile(.{
+    mdbx.root_module.addCSourceFile(.{
         .file = b.path("version.c"),
         .flags = flags,
     });
 
-    mdbx.addCSourceFile(.{
+    mdbx.root_module.addCSourceFile(.{
         .file = b.path("cpu_stub.c"),
         .flags = &[_][]const u8{"-fPIC"},
     });
 
-    mdbx.addIncludePath(b.path("vendor/libmdbx"));
-    mdbx.addIncludePath(b.path("vendor/libmdbx/src"));
-    mdbx.linkLibC();
+    mdbx.root_module.addIncludePath(b.path("vendor/libmdbx"));
+    mdbx.root_module.addIncludePath(b.path("vendor/libmdbx/src"));
+    mdbx.root_module.link_libc = true;
 
-    lib.linkLibrary(mdbx);
-    lib.linkLibC();
+    lib.root_module.linkLibrary(mdbx);
+    lib.root_module.link_libc = true;
 
     const install = b.addInstallArtifact(lib, .{});
 
@@ -123,6 +123,12 @@ pub fn build(b: *std.Build) void {
         // Build for a single target (specified by user or native)
         const target = b.standardTargetOptions(.{});
         const target_str = build_utils.getTargetString(target);
+        const native_musl = b.resolveTargetQuery(.{
+            .cpu_arch = .x86_64,
+            .os_tag = .linux,
+            .abi = .musl,
+        });
+        const test_target = if (target.query.isNative()) native_musl else target;
 
         const mdbx_name = build_utils.getLibName(std.heap.page_allocator, "mdbx", target_str);
 
@@ -167,24 +173,24 @@ pub fn build(b: *std.Build) void {
         else
             &base_flags_test;
 
-        mdbx.addCSourceFile(.{
+        mdbx.root_module.addCSourceFile(.{
             .file = b.path("vendor/libmdbx/src/alloy.c"),
             .flags = flags,
         });
 
-        mdbx.addCSourceFile(.{
+        mdbx.root_module.addCSourceFile(.{
             .file = b.path("version.c"),
             .flags = flags,
         });
 
-        mdbx.addCSourceFile(.{
+        mdbx.root_module.addCSourceFile(.{
             .file = b.path("cpu_stub.c"),
             .flags = &[_][]const u8{"-fPIC"},
         });
 
-        mdbx.addIncludePath(b.path("vendor/libmdbx"));
-        mdbx.addIncludePath(b.path("vendor/libmdbx/src"));
-        mdbx.linkLibC();
+        mdbx.root_module.addIncludePath(b.path("vendor/libmdbx"));
+        mdbx.root_module.addIncludePath(b.path("vendor/libmdbx/src"));
+        mdbx.root_module.link_libc = true;
 
         // Recreate lib for tests
         const lib_name = build_utils.getLibName(std.heap.page_allocator, "lmdbx", target_str);
@@ -199,22 +205,75 @@ pub fn build(b: *std.Build) void {
             }),
         });
 
-        lib.linkLibrary(mdbx);
-        lib.linkLibC();
+        lib.root_module.linkLibrary(mdbx);
+        lib.root_module.link_libc = true;
 
         b.installArtifact(lib);
+
+        const mdbx_tests = b.addLibrary(.{
+            .name = "mdbx_tests",
+            .linkage = .static,
+            .root_module = b.createModule(.{
+                .target = test_target,
+                .optimize = optimize,
+            }),
+        });
+
+        const cpu_arch_tests = test_target.result.cpu.arch;
+        const abi_tests = test_target.result.abi;
+        const flags_tests: []const []const u8 = if (cpu_arch_tests == .x86_64 and (abi_tests == .gnu or abi_tests == .gnueabi or abi_tests == .gnueabihf))
+            &x86_gnu_flags_test
+        else if (cpu_arch_tests == .x86_64)
+            &x86_flags_test
+        else if (abi_tests == .gnu or abi_tests == .gnueabi or abi_tests == .gnueabihf)
+            &glibc_cross_flags_test
+        else
+            &base_flags_test;
+
+        mdbx_tests.root_module.addCSourceFile(.{
+            .file = b.path("vendor/libmdbx/src/alloy.c"),
+            .flags = flags_tests,
+        });
+
+        mdbx_tests.root_module.addCSourceFile(.{
+            .file = b.path("version.c"),
+            .flags = flags_tests,
+        });
+
+        mdbx_tests.root_module.addCSourceFile(.{
+            .file = b.path("cpu_stub.c"),
+            .flags = &[_][]const u8{"-fPIC"},
+        });
+
+        mdbx_tests.root_module.addIncludePath(b.path("vendor/libmdbx"));
+        mdbx_tests.root_module.addIncludePath(b.path("vendor/libmdbx/src"));
+        mdbx_tests.root_module.link_libc = true;
+
+        const lib_tests = b.addLibrary(.{
+            .name = "lmdbx_tests",
+            .linkage = .static,
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/main.zig"),
+                .target = test_target,
+                .optimize = optimize,
+            }),
+        });
+
+        lib_tests.root_module.linkLibrary(mdbx_tests);
+        lib_tests.root_module.link_libc = true;
 
         // Tests for cursor functions
         const cursor_tests = b.addTest(.{
             .root_module = b.createModule(.{
                 .root_source_file = b.path("src/test_cursor.zig"),
-                .target = target,
+                .target = test_target,
                 .optimize = optimize,
             }),
         });
 
-        cursor_tests.linkLibrary(mdbx);
-        cursor_tests.linkLibC();
+        cursor_tests.root_module.linkLibrary(mdbx_tests);
+        cursor_tests.root_module.link_libc = true;
+        cursor_tests.use_new_linker = false;
 
         const run_cursor_tests = b.addRunArtifact(cursor_tests);
 
@@ -222,15 +281,16 @@ pub fn build(b: *std.Build) void {
         const c_api_tests = b.addTest(.{
             .root_module = b.createModule(.{
                 .root_source_file = b.path("src/test_c_api.zig"),
-                .target = target,
+                .target = test_target,
                 .optimize = optimize,
             }),
         });
 
-        c_api_tests.root_module.addImport("lmdbx", lib.root_module);
-        c_api_tests.linkLibrary(lib);
-        c_api_tests.linkLibrary(mdbx);
-        c_api_tests.linkLibC();
+        c_api_tests.root_module.addImport("lmdbx", lib_tests.root_module);
+        c_api_tests.root_module.linkLibrary(lib_tests);
+        c_api_tests.root_module.linkLibrary(mdbx_tests);
+        c_api_tests.root_module.link_libc = true;
+        c_api_tests.use_new_linker = false;
 
         const run_c_api_tests = b.addRunArtifact(c_api_tests);
 
@@ -242,14 +302,14 @@ pub fn build(b: *std.Build) void {
             .name = "compact_test",
             .root_module = b.createModule(.{
                 .root_source_file = b.path("compact_test.zig"),
-                .target = target,
+                .target = test_target,
                 .optimize = optimize,
             }),
         });
-        compact_test_exe.root_module.addImport("lmdbx", lib.root_module);
-        compact_test_exe.linkLibrary(lib);
-        compact_test_exe.linkLibrary(mdbx);
-        compact_test_exe.linkLibC();
+        compact_test_exe.root_module.addImport("lmdbx", lib_tests.root_module);
+        compact_test_exe.root_module.linkLibrary(lib_tests);
+        compact_test_exe.root_module.linkLibrary(mdbx_tests);
+        compact_test_exe.root_module.link_libc = true;
 
         const run_compact_test = b.addRunArtifact(compact_test_exe);
         const compact_step = b.step("compact-test", "Run compact test");

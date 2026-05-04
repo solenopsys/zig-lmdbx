@@ -5,12 +5,12 @@ pub fn main() !void {
     std.debug.print("Testing lmdbx.zig directly\n", .{});
 
     // Cleanup
-    std.fs.cwd().deleteFile("/tmp/test_debug.db") catch {};
-    std.fs.cwd().deleteFile("/tmp/test_debug.db-lock") catch {};
+    std.Io.Dir.cwd().deleteFile(std.Options.debug_io, "/tmp/test_debug.db") catch {};
+    std.Io.Dir.cwd().deleteFile(std.Options.debug_io, "/tmp/test_debug.db-lock") catch {};
 
     defer {
-        std.fs.cwd().deleteFile("/tmp/test_debug.db") catch {};
-        std.fs.cwd().deleteFile("/tmp/test_debug.db-lock") catch {};
+        std.Io.Dir.cwd().deleteFile(std.Options.debug_io, "/tmp/test_debug.db") catch {};
+        std.Io.Dir.cwd().deleteFile(std.Options.debug_io, "/tmp/test_debug.db-lock") catch {};
     }
 
     std.debug.print("Opening database...\n", .{});

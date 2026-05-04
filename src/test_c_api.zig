@@ -13,11 +13,11 @@ extern fn lmdbx_cursor_get(cursor_ptr: ?*anyopaque, key_ptr: *?[*]u8, key_len: *
 test "C API: open, put, get, close" {
     std.debug.print("\n[TEST] C API basic operations\n", .{});
 
-    std.fs.cwd().deleteFile("/tmp/test_c_api.db") catch {};
-    std.fs.cwd().deleteFile("/tmp/test_c_api.db-lock") catch {};
+    std.Io.Dir.cwd().deleteFile(std.Options.debug_io, "/tmp/test_c_api.db") catch {};
+    std.Io.Dir.cwd().deleteFile(std.Options.debug_io, "/tmp/test_c_api.db-lock") catch {};
     defer {
-        std.fs.cwd().deleteFile("/tmp/test_c_api.db") catch {};
-        std.fs.cwd().deleteFile("/tmp/test_c_api.db-lock") catch {};
+        std.Io.Dir.cwd().deleteFile(std.Options.debug_io, "/tmp/test_c_api.db") catch {};
+        std.Io.Dir.cwd().deleteFile(std.Options.debug_io, "/tmp/test_c_api.db-lock") catch {};
     }
 
     // Open
@@ -47,11 +47,11 @@ test "C API: open, put, get, close" {
 test "C API: cursor operations" {
     std.debug.print("\n[TEST] C API cursor operations\n", .{});
 
-    std.fs.cwd().deleteFile("/tmp/test_c_cursor.db") catch {};
-    std.fs.cwd().deleteFile("/tmp/test_c_cursor.db-lock") catch {};
+    std.Io.Dir.cwd().deleteFile(std.Options.debug_io, "/tmp/test_c_cursor.db") catch {};
+    std.Io.Dir.cwd().deleteFile(std.Options.debug_io, "/tmp/test_c_cursor.db-lock") catch {};
     defer {
-        std.fs.cwd().deleteFile("/tmp/test_c_cursor.db") catch {};
-        std.fs.cwd().deleteFile("/tmp/test_c_cursor.db-lock") catch {};
+        std.Io.Dir.cwd().deleteFile(std.Options.debug_io, "/tmp/test_c_cursor.db") catch {};
+        std.Io.Dir.cwd().deleteFile(std.Options.debug_io, "/tmp/test_c_cursor.db-lock") catch {};
     }
 
     // Open database
@@ -97,11 +97,11 @@ test "C API: cursor operations" {
 test "C API: delete operation" {
     std.debug.print("\n[TEST] C API delete operation\n", .{});
 
-    std.fs.cwd().deleteFile("/tmp/test_c_del.db") catch {};
-    std.fs.cwd().deleteFile("/tmp/test_c_del.db-lock") catch {};
+    std.Io.Dir.cwd().deleteFile(std.Options.debug_io, "/tmp/test_c_del.db") catch {};
+    std.Io.Dir.cwd().deleteFile(std.Options.debug_io, "/tmp/test_c_del.db-lock") catch {};
     defer {
-        std.fs.cwd().deleteFile("/tmp/test_c_del.db") catch {};
-        std.fs.cwd().deleteFile("/tmp/test_c_del.db-lock") catch {};
+        std.Io.Dir.cwd().deleteFile(std.Options.debug_io, "/tmp/test_c_del.db") catch {};
+        std.Io.Dir.cwd().deleteFile(std.Options.debug_io, "/tmp/test_c_del.db-lock") catch {};
     }
 
     // Open

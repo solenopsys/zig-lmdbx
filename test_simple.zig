@@ -5,12 +5,12 @@ pub fn main() !void {
     std.debug.print("Test simple lmdbx\n", .{});
 
     // Cleanup
-    std.fs.cwd().deleteFile("/tmp/test_simple.db") catch {};
-    std.fs.cwd().deleteFile("/tmp/test_simple.db-lock") catch {};
+    std.Io.Dir.cwd().deleteFile(std.Options.debug_io, "/tmp/test_simple.db") catch {};
+    std.Io.Dir.cwd().deleteFile(std.Options.debug_io, "/tmp/test_simple.db-lock") catch {};
 
     defer {
-        std.fs.cwd().deleteFile("/tmp/test_simple.db") catch {};
-        std.fs.cwd().deleteFile("/tmp/test_simple.db-lock") catch {};
+        std.Io.Dir.cwd().deleteFile(std.Options.debug_io, "/tmp/test_simple.db") catch {};
+        std.Io.Dir.cwd().deleteFile(std.Options.debug_io, "/tmp/test_simple.db-lock") catch {};
     }
 
     var db = try lmdbx.Database.open("/tmp/test_simple.db");

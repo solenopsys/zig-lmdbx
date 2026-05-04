@@ -18,8 +18,36 @@ pub const MdbxError = error{
 
 const mib: isize = 1024 * 1024;
 
+fn deletePath(path: []const u8) void {
+    var path_buf: [std.fs.max_path_bytes:0]u8 = undefined;
+    if (path.len >= path_buf.len) return;
+    @memcpy(path_buf[0..path.len], path);
+    path_buf[path.len] = 0;
+    _ = std.c.unlink(&path_buf);
+    _ = std.c.rmdir(&path_buf);
+}
+
+fn renamePath(old: []const u8, new: []const u8) !void {
+    var old_buf: [std.fs.max_path_bytes:0]u8 = undefined;
+    var new_buf: [std.fs.max_path_bytes:0]u8 = undefined;
+    if (old.len >= old_buf.len or new.len >= new_buf.len) return error.NameTooLong;
+    @memcpy(old_buf[0..old.len], old);
+    old_buf[old.len] = 0;
+    @memcpy(new_buf[0..new.len], new);
+    new_buf[new.len] = 0;
+    switch (std.c.errno(std.c.rename(&old_buf, &new_buf))) {
+        .SUCCESS => return,
+        else => return error.Unexpected,
+    }
+}
+
 fn parseMiBEnv(name: []const u8, fallback_mib: isize) isize {
-    const raw = std.posix.getenv(name) orelse return fallback_mib;
+    var name_buf: [128:0]u8 = undefined;
+    if (name.len >= name_buf.len) return fallback_mib;
+    @memcpy(name_buf[0..name.len], name);
+    name_buf[name.len] = 0;
+    const raw_z = std.c.getenv(&name_buf) orelse return fallback_mib;
+    const raw = std.mem.span(raw_z);
     const parsed = std.fmt.parseInt(isize, raw, 10) catch return fallback_mib;
     if (parsed <= 0) return fallback_mib;
     return parsed;
@@ -355,13 +383,15 @@ pub const Database = struct {
         const tmp_path = try allocator.dupeZ(u8, tmp_str);
         defer allocator.free(tmp_path);
 
-        // Remove leftover tmp dir if exists — mdbx_env_copy creates the dir itself
-        std.fs.cwd().deleteTree(tmp_path) catch {};
+        // Best-effort cleanup of leftover tmp path; mdbx_env_copy creates the dir itself.
+        _ = std.c.unlink(tmp_path.ptr);
+        _ = std.c.rmdir(tmp_path.ptr);
 
         const rc = ffi.mdbx_env_copy(self.env, tmp_path.ptr, ffi.MDBX_CP_COMPACT);
         if (rc != ffi.MDBX_SUCCESS) {
             std.log.err("mdbx_env_copy compact failed: rc={d} ({s})", .{ rc, ffi.mdbx_strerror(rc) });
-            std.fs.cwd().deleteTree(tmp_path) catch {};
+            _ = std.c.unlink(tmp_path.ptr);
+            _ = std.c.rmdir(tmp_path.ptr);
             return MdbxError.OpenFailed;
         }
 
@@ -379,14 +409,14 @@ pub const Database = struct {
         defer allocator.free(orig_lck);
 
         // Move original aside
-        std.fs.cwd().rename(orig_dat, bak_dat) catch {};
-        std.fs.cwd().deleteFile(orig_lck) catch {};
+        renamePath(orig_dat, bak_dat) catch {};
+        deletePath(orig_lck);
 
         // Put compacted file in place
-        std.fs.cwd().rename(tmp_str, orig_dat) catch |e| {
+        renamePath(tmp_str, orig_dat) catch |e| {
             std.log.err("compact rename dat failed: {}", .{e});
             // Restore original
-            std.fs.cwd().rename(bak_dat, orig_dat) catch {};
+            renamePath(bak_dat, orig_dat) catch {};
             return MdbxError.OpenFailed;
         };
 
@@ -402,7 +432,7 @@ pub const Database = struct {
         self.current_txn = null;
 
         // Reopen succeeded — safe to delete backup
-        std.fs.cwd().deleteFile(bak_dat) catch {};
+        deletePath(bak_dat);
     }
 
     /// Returns utilization ratio (0.0 – 1.0): used pages / file size.
