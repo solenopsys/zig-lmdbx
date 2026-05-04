@@ -435,6 +435,16 @@ pub const Database = struct {
         deletePath(bak_dat);
     }
 
+    /// Returns bytes occupied by actual data (used pages * page_size).
+    /// Returns 0 if info cannot be obtained.
+    pub fn usedBytes(self: *Database) u64 {
+        var info: ffi.MDBX_envinfo = undefined;
+        const rc = ffi.mdbx_env_info_ex(self.env, null, &info, @sizeOf(ffi.MDBX_envinfo));
+        if (rc != ffi.MDBX_SUCCESS) return 0;
+        const page_size: u64 = if (info.mi_dxb_pagesize > 0) info.mi_dxb_pagesize else 4096;
+        return info.mi_last_pgno * page_size;
+    }
+
     /// Returns utilization ratio (0.0 – 1.0): used pages / file size.
     /// Returns null if info cannot be obtained.
     pub fn utilization(self: *Database) ?f64 {

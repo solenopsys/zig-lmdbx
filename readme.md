@@ -35,7 +35,7 @@ The performance advantage is especially noticeable in write-heavy workloads with
 
 ### Prerequisites
 
-- Zig 0.15.1 or higher
+- Zig 0.16.0 or higher
 - libmdbx submodule initialized: `git submodule update --init --recursive`
 
 ### Single Target Build
