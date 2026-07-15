@@ -41,6 +41,25 @@ fn renamePath(old: []const u8, new: []const u8) !void {
     }
 }
 
+fn pathExists(path: []const u8) bool {
+    std.Io.Dir.cwd().access(std.Options.debug_io, path, .{}) catch return false;
+    return true;
+}
+
+fn recoverInterruptedCompact(path: []const u8) void {
+    var dat_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var bak_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dat = std.fmt.bufPrint(&dat_buf, "{s}/mdbx.dat", .{path}) catch return;
+    const bak = std.fmt.bufPrint(&bak_buf, "{s}/mdbx.dat.bak", .{path}) catch return;
+
+    if (!pathExists(bak) or pathExists(dat)) return;
+    renamePath(bak, dat) catch |err| {
+        std.log.warn("mdbx compact recovery failed for {s}: {}", .{ path, err });
+        return;
+    };
+    std.log.warn("mdbx compact recovery restored {s} from mdbx.dat.bak", .{path});
+}
+
 fn parseMiBEnv(name: []const u8, fallback_mib: isize) isize {
     var name_buf: [128:0]u8 = undefined;
     if (name.len >= name_buf.len) return fallback_mib;
@@ -53,13 +72,15 @@ fn parseMiBEnv(name: []const u8, fallback_mib: isize) isize {
     return parsed;
 }
 
-fn geometryFromEnv() struct {
+pub const Geometry = struct {
     lower: isize,
     now: isize,
     upper: isize,
     growth: isize,
     shrink: isize,
-} {
+};
+
+pub fn geometryFromEnv() Geometry {
     const lower_mib = parseMiBEnv("LMDBX_MAP_LOWER_MIB", 1);
     const now_mib = parseMiBEnv("LMDBX_MAP_NOW_MIB", 1);
     const upper_mib = parseMiBEnv("LMDBX_MAP_UPPER_MIB", 1024 * 1024);
@@ -142,9 +163,16 @@ pub const Database = struct {
     env: *ffi.MDBX_env,
     dbi: ffi.MDBX_dbi,
     current_txn: ?*ffi.MDBX_txn,
+    geometry: Geometry,
 
     pub fn open(path: [:0]const u8) !Database {
+        return openWithGeometry(path, geometryFromEnv());
+    }
+
+    pub fn openWithGeometry(path: [:0]const u8, geometry: Geometry) !Database {
         var env: ?*ffi.MDBX_env = null;
+
+        recoverInterruptedCompact(path);
 
         var rc = ffi.mdbx_env_create(&env);
         if (rc != ffi.MDBX_SUCCESS) return MdbxError.CreateFailed;
@@ -154,14 +182,13 @@ pub const Database = struct {
         _ = ffi.mdbx_env_set_maxdbs(env, 128);
 
         // Configure map geometry so large values don't fail with MDBX_MAP_FULL.
-        const g = geometryFromEnv();
         rc = ffi.mdbx_env_set_geometry(
             env,
-            g.lower,
-            g.now,
-            g.upper,
-            g.growth,
-            g.shrink,
+            geometry.lower,
+            geometry.now,
+            geometry.upper,
+            geometry.growth,
+            geometry.shrink,
             -1,
         );
         if (rc != ffi.MDBX_SUCCESS) {
@@ -169,7 +196,7 @@ pub const Database = struct {
             return MdbxError.OpenFailed;
         }
 
-        rc = ffi.mdbx_env_open(env, path.ptr, ffi.MDBX_CREATE, 0o664);
+        rc = ffi.mdbx_env_open(env, path.ptr, ffi.MDBX_ENV_DEFAULTS, 0o664);
         if (rc != ffi.MDBX_SUCCESS) {
             _ = ffi.mdbx_env_close(env);
             return MdbxError.OpenFailed;
@@ -183,7 +210,7 @@ pub const Database = struct {
         }
 
         var dbi: ffi.MDBX_dbi = undefined;
-        rc = ffi.mdbx_dbi_open(txn, null, ffi.MDBX_CREATE, &dbi);
+        rc = ffi.mdbx_dbi_open(txn, null, ffi.MDBX_DB_CREATE, &dbi);
         if (rc != ffi.MDBX_SUCCESS) {
             _ = ffi.mdbx_txn_abort(txn);
             _ = ffi.mdbx_env_close(env);
@@ -200,6 +227,7 @@ pub const Database = struct {
             .env = env.?,
             .dbi = dbi,
             .current_txn = null,
+            .geometry = geometry,
         };
     }
 
@@ -371,8 +399,11 @@ pub const Database = struct {
     }
 
     pub fn flush(self: *Database) !void {
-        const rc = ffi.mdbx_env_sync(self.env);
-        if (rc != ffi.MDBX_SUCCESS) return MdbxError.TxnCommitFailed;
+        const rc = ffi.mdbx_env_sync_ex(self.env, true, false);
+        if (rc != ffi.MDBX_SUCCESS and rc != ffi.MDBX_RESULT_TRUE) {
+            std.log.err("mdbx_env_sync_ex failed: rc={d} ({s})", .{ rc, ffi.mdbx_strerror(rc) });
+            return MdbxError.TxnCommitFailed;
+        }
     }
 
     /// Compact database: copy with MDBX_CP_COMPACT to tmp, then replace original.
@@ -423,13 +454,14 @@ pub const Database = struct {
         // Reopen — if this fails, bak is still there for manual recovery
         const path_z = try allocator.dupeZ(u8, path);
         defer allocator.free(path_z);
-        const reopened = Database.open(path_z) catch |e| {
+        const reopened = Database.openWithGeometry(path_z, self.geometry) catch |e| {
             std.log.err("compact reopen failed: {}", .{e});
             return e;
         };
         self.env = reopened.env;
         self.dbi = reopened.dbi;
         self.current_txn = null;
+        self.geometry = reopened.geometry;
 
         // Reopen succeeded — safe to delete backup
         deletePath(bak_dat);

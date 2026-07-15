@@ -16,11 +16,14 @@ pub const MDBX_dbi = u32;
 // ============================================================================
 
 pub const MDBX_SUCCESS: c_int = 0;
+pub const MDBX_RESULT_TRUE: c_int = -1;
 pub const MDBX_NOTFOUND: c_int = -30798;
 pub const MDBX_MAP_FULL: c_int = -30792;
 
 // Environment flags
+pub const MDBX_ENV_DEFAULTS: c_uint = 0;
 pub const MDBX_CREATE: c_uint = 0x40000;
+pub const MDBX_DB_CREATE: c_uint = 0x40000;
 pub const MDBX_COALESCE: c_uint = 0x2000000;
 pub const MDBX_LIFORECLAIM: c_uint = 0x4000000;
 pub const MDBX_NOMETASYNC: c_uint = 0x40000;
@@ -64,7 +67,7 @@ pub extern "c" fn mdbx_env_set_geometry(
     shrink_threshold: isize,
     pagesize: isize,
 ) c_int;
-pub extern "c" fn mdbx_env_sync(env: ?*MDBX_env) c_int;
+pub extern "c" fn mdbx_env_sync_ex(env: ?*MDBX_env, force: bool, nonblock: bool) c_int;
 
 pub extern "c" fn mdbx_txn_begin(env: ?*MDBX_env, parent: ?*MDBX_txn, flags: c_uint, txn: *?*MDBX_txn) c_int;
 pub extern "c" fn mdbx_txn_commit(txn: ?*MDBX_txn) c_int;
